@@ -1,0 +1,7 @@
+data/
+*.npz
+*.tar.gz
+*.png
+__pycache__/
+*.pyc
+.DS_Store
