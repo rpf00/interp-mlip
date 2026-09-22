@@ -328,57 +328,8 @@ def demo_systems(n: int = 2000, seed: int = 0) -> list[dict]:
     return systems
 
 
-def _default_spin(task: str) -> int:
-    """OMol defaults to spin multiplicity 1; every other task expects 0."""
-    return 1 if task == "omol" else 0
-
-
-def systems_from_asedb(
-    src: str, task: str = "omol", n: int | None = None, seed: int = 0
-) -> list[dict]:
-    """
-    Load structures from OMol25 .aselmdb files (or any ASE DB).
-
-    src may be a single .aselmdb, a folder of them, or a glob string.
-    Charge and spin live in atoms.info because ASE has no native slot for them.
-    """
-    from fairchem.core.datasets import AseDBDataset
-
-    ds = AseDBDataset({"src": src})
-    total = len(ds)
-    print(f"{total} structures in {src}")
-
-    if n is not None and n < total:
-        rng = np.random.default_rng(seed)
-        idxs = rng.choice(total, size=n, replace=False)
-    else:
-        idxs = np.arange(total)
-
-    systems, missing = [], 0
-    for i in idxs:
-        atoms = ds.get_atoms(int(i))
-        if "charge" not in atoms.info or "spin" not in atoms.info:
-            missing += 1
-        systems.append(
-            {
-                "numbers": atoms.get_atomic_numbers(),
-                "charge": int(atoms.info.get("charge", 0)),
-                "spin": int(atoms.info.get("spin", _default_spin(task))),
-                "task": task,
-                "sid": atoms.info.get("sid", int(i)),
-            }
-        )
-    if missing:
-        print(
-            f"WARNING: {missing}/{len(systems)} structures lacked charge/spin in "
-            f"atoms.info; defaulted to charge=0, spin={_default_spin(task)}. "
-            "For omol these drive the router directly -- verify before trusting results."
-        )
-    return systems
-
-
 def systems_from_dir(path: str, task: str = "omol") -> list[dict]:
-    """Fallback loader for plain xyz/cif/traj files."""
+    """Load any ASE-readable structures from a directory. Charge/spin from info if present."""
     from pathlib import Path
 
     from ase.io import read
@@ -392,7 +343,7 @@ def systems_from_dir(path: str, task: str = "omol") -> list[dict]:
                 {
                     "numbers": atoms.get_atomic_numbers(),
                     "charge": int(atoms.info.get("charge", 0)),
-                    "spin": int(atoms.info.get("spin", _default_spin(task))),
+                    "spin": int(atoms.info.get("spin", 0)),
                     "task": task,
                 }
             )
@@ -405,12 +356,6 @@ def main():
     p.add_argument("--model", default="uma-s-1p1")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--demo", action="store_true", help="use synthetic systems")
-    p.add_argument(
-        "--asedb",
-        default=None,
-        help="OMol25 .aselmdb file, folder of them, or glob string",
-    )
-    p.add_argument("--n-samples", type=int, default=20000, help="structures to sample")
     p.add_argument("--xyz-dir", default=None, help="directory of ASE-readable structures")
     p.add_argument("--task", default="omol", help="task label for --xyz-dir structures")
     p.add_argument("--min-count", type=int, default=5, help="hide elements seen < N times")
@@ -422,29 +367,19 @@ def main():
     )
     args = p.parse_args()
 
-    if args.asedb:
-        systems = systems_from_asedb(
-            args.asedb, task=args.task, n=args.n_samples
-        )
-    elif args.xyz_dir:
+    if args.xyz_dir:
         systems = systems_from_dir(args.xyz_dir, task=args.task)
     else:
         systems = demo_systems()
         if not args.demo:
-            print("No --asedb given; falling back to --demo synthetic systems.\n")
+            print("No --xyz-dir given; falling back to --demo synthetic systems.\n")
 
     print(f"{len(systems)} structures")
     unique, counts = dedupe(systems)
-    ratio = len(systems) / max(len(unique), 1)
     print(
         f"{len(unique)} unique (composition, charge, spin, task) tuples "
-        f"-- collapse ratio {ratio:.1f}x"
+        f"-- collapse ratio {len(systems) / max(len(unique), 1):.1f}x"
     )
-    if ratio > 3:
-        print(
-            f"NOTE: effective sample size is {len(unique)}, not {len(systems)}. "
-            "Routing ignores positions, so duplicate tuples give identical alpha."
-        )
 
     backbone = load_backbone(args.model, device=args.device)
     alpha_raw = routing_coefficients(backbone, unique, device=args.device)
