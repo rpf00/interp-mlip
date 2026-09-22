@@ -32,7 +32,7 @@ X ∈ ℝ≥0^(500 × 5 × 4 × 32)   [composition × charge × spin level × ex
 
 100% fill, no structural missingness, uniform cell reliability.
 
-## Main result
+## Main result (preliminary)
 
 Non-negative CP at rank 3 recovers a **singlet detector**: a component whose
 charge ⊗ spin outer product is 1.08–1.25 on multiplicity-1 cells and ≤0.065 on all
